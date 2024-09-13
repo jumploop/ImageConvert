@@ -12,6 +12,7 @@
 - WebP 压缩方法：使用 method=6 参数来获得更好的 WebP 压缩效果（这是最慢但效果最好的压缩方法）。
 - 输入格式扩展：在批处理中包含了 .webp 文件，以便处理现有的 WebP 图片。
 - 支持的图片格式： JPG，PNG, JPEG, GIF, BMP, WEBP
+- 支持递归的处理图片
 
 ## 前提条件
 
@@ -52,4 +53,14 @@ python image_convert.py input_image.png WEBP -o output_directory -q 80
 5. 从 WebP 转换：
 ```
 python image_convert.py input_image.webp JPEG -o output_directory -q 90
+```
+
+6. 递归的处理图片
+```
+python image_convert.py input_image.webp JPEG -o output_directory -q 90 -r
+```
+
+7. 保持原目录结构
+```
+python image_convert.py input_image.webp JPEG -o output_directory -q 90 -r -m
 ```
