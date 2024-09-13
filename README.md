@@ -32,35 +32,35 @@ pip install --upgrade pillow
 
 1. 单文件转换：
 ```
-python image_convert.py input_image.png JPEG -o output_directory -q 90
+python image_convert.py -i input_image.png -f JPEG -o output_directory -q 90
 ```
 
 2. 目录批量转换：
 ```
-python image_convert.py input_directory PNG -o output_directory
+python image_convert.py -i input_directory -f PNG -o output_directory
 ```
 
 3. 使用默认设置：
 ```
-python image_convert.py input_directory JPEG
+python image_convert.py -i input_directory -f JPEG
 ```
 
 4. 转换为 WebP：
 ```
-python image_convert.py input_image.png WEBP -o output_directory -q 80
+python image_convert.py -i input_image.png -f WEBP -o output_directory -q 80
 ```
 
 5. 从 WebP 转换：
 ```
-python image_convert.py input_image.webp JPEG -o output_directory -q 90
+python image_convert.py -i input_image.webp -f JPEG -o output_directory -q 90
 ```
 
 6. 递归的处理图片
 ```
-python image_convert.py input_image.webp JPEG -o output_directory -q 90 -r
+python image_convert.py -i input_image.webp -f JPEG -o output_directory -q 90 -r
 ```
 
 7. 保持原目录结构
 ```
-python image_convert.py input_image.webp JPEG -o output_directory -q 90 -r -m
+python image_convert.py -i input_image.webp -f JPEG -o output_directory -q 90 -r -m
 ```
