@@ -74,8 +74,8 @@ class ImageConverter:
 
 def main():
     parser = argparse.ArgumentParser(description="批量图片格式转换工具 (支持WebP和递归处理)")
-    parser.add_argument("input", help="输入文件或目录路径")
-    parser.add_argument("format", help="目标格式 (例如 PNG, JPEG, GIF, BMP, WEBP)")
+    parser.add_argument("-i", "input", help="输入文件或目录路径")
+    parser.add_argument("-f", "format", help="目标格式 (例如 PNG, JPEG, GIF, BMP, WEBP)")
     parser.add_argument("-o", "--output", help="输出目录 (默认为当前目录下的 'converted' 文件夹)", default="converted")
     parser.add_argument("-q", "--quality", type=int, help="JPEG和WebP质量 (1-100, 默认85)", default=85)
     parser.add_argument("-r", "--recursive", action="store_true", help="递归处理子目录")
