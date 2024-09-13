@@ -1,79 +1,92 @@
-#!/usr/bin/env python
-import os
+from pathlib import Path
 from PIL import Image
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from typing import List
 
 
-def convert_image(input_path, output_dir, format, quality=85):
-    """
-    将单个图片从一种格式转换为另一种格式，包括WebP
+class ImageConverter:
+    def __init__(self, format: str, quality: int = 85, recursive: bool = False, maintain_structure: bool = False):
+        self.format = format.upper()
+        self.quality = quality
+        self.recursive = recursive
+        self.maintain_structure = maintain_structure
 
-    :param input_path: 输入图片的路径
-    :param output_dir: 输出目录
-    :param format: 目标格式 (例如 'PNG', 'JPEG', 'GIF', 'BMP', 'WEBP')
-    :param quality: 输出图片质量 (对JPEG和WebP有效)
-    """
-    try:
-        with Image.open(input_path) as img:
-            # 处理 RGBA 模式
-            if img.mode == 'RGBA' and format.upper() in ['JPEG', 'WEBP']:
-                img = img.convert('RGB')
+    def convert_image(self, input_path: Path, output_dir: Path) -> None:
+        """
+        将单个图片从一种格式转换为另一种格式，包括WebP
+        """
+        try:
+            with Image.open(input_path) as img:
+                if img.mode == 'RGBA' and self.format in ['JPEG', 'WEBP']:
+                    img = img.convert('RGB')
 
-            # 生成输出文件路径
-            file_name = os.path.splitext(os.path.basename(input_path))[0]
-            output_path = os.path.join(output_dir, f"{file_name}.{format.lower()}")
+                if self.maintain_structure:
+                    rel_path = input_path.relative_to(self.input_dir)
+                    full_output_dir = output_dir / rel_path.parent
+                else:
+                    full_output_dir = output_dir
 
-            # 保存为新格式
-            if format.upper() == 'WEBP':
-                img.save(output_path, format, quality=quality, method=6)
-            else:
-                img.save(output_path, format, quality=quality)
-        print(f"已成功转换: {input_path} -> {output_path}")
-    except Exception as e:
-        print(f"转换 {input_path} 时出错: {e}")
+                full_output_dir.mkdir(parents=True, exist_ok=True)
+                output_path = full_output_dir / f"{input_path.stem}.{self.format.lower()}"
 
+                save_kwargs = {'quality': self.quality}
+                if self.format == 'WEBP':
+                    save_kwargs['method'] = 6
 
-def batch_convert(input_dir, output_dir, format, quality=85):
-    """
-    批量转换指定目录下的所有图片
+                img.save(output_path, self.format, **save_kwargs)
+            print(f"已成功转换: {input_path} -> {output_path}")
+        except Exception as e:
+            print(f"转换 {input_path} 时出错: {e}")
 
-    :param input_dir: 输入目录
-    :param output_dir: 输出目录
-    :param format: 目标格式
-    :param quality: 输出图片质量 (对JPEG和WebP有效)
-    """
-    os.makedirs(output_dir, exist_ok=True)
+    def process_directory(self, input_dir: Path, output_dir: Path) -> None:
+        """
+        处理目录中的所有图片，可选择递归处理子目录
+        """
+        self.input_dir = input_dir  # 存储输入目录以供 convert_image 使用
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 获取所有图片文件，包括WebP
-    image_files = [f for f in os.listdir(input_dir) if
-                   f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'))]
+        pattern = '**/*' if self.recursive else '*'
+        image_files = self.get_image_files(input_dir, pattern)
 
-    with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(convert_image, os.path.join(input_dir, f), output_dir, format, quality) for f in
-                   image_files]
-        for future in futures:
-            future.result()
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(self.convert_image, f, output_dir) for f in image_files]
+            for future in futures:
+                future.result()
+
+    @staticmethod
+    def get_image_files(directory: Path, pattern: str) -> List[Path]:
+        """获取指定目录下的所有图片文件"""
+        return [f for f in directory.glob(pattern) if
+                f.is_file() and f.suffix.lower() in ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp')]
+
+    def run(self, input_path: Path, output_path: Path) -> None:
+        """运行转换过程"""
+        if input_path.is_file():
+            output_dir = output_path.parent
+            output_dir.mkdir(parents=True, exist_ok=True)
+            self.convert_image(input_path, output_dir)
+        elif input_path.is_dir():
+            self.process_directory(input_path, output_path)
+        else:
+            print("错误：输入路径无效")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="批量图片格式转换工具 (支持WebP)")
+    parser = argparse.ArgumentParser(description="批量图片格式转换工具 (支持WebP和递归处理)")
     parser.add_argument("input", help="输入文件或目录路径")
     parser.add_argument("format", help="目标格式 (例如 PNG, JPEG, GIF, BMP, WEBP)")
     parser.add_argument("-o", "--output", help="输出目录 (默认为当前目录下的 'converted' 文件夹)", default="converted")
     parser.add_argument("-q", "--quality", type=int, help="JPEG和WebP质量 (1-100, 默认85)", default=85)
+    parser.add_argument("-r", "--recursive", action="store_true", help="递归处理子目录")
+    parser.add_argument("-m", "--maintain-structure", action="store_true", help="保持原目录结构")
     args = parser.parse_args()
 
-    format = args.format.upper()
+    input_path = Path(args.input).resolve()
+    output_path = Path(args.output).resolve()
 
-    if os.path.isfile(args.input):
-        output_dir = os.path.dirname(args.output)
-        os.makedirs(output_dir, exist_ok=True)
-        convert_image(args.input, output_dir, format, args.quality)
-    elif os.path.isdir(args.input):
-        batch_convert(args.input, args.output, format, args.quality)
-    else:
-        print("错误：输入路径无效")
+    converter = ImageConverter(args.format, args.quality, args.recursive, args.maintain_structure)
+    converter.run(input_path, output_path)
 
 
 if __name__ == "__main__":
