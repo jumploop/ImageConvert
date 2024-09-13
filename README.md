@@ -13,6 +13,14 @@
 - 输入格式扩展：在批处理中包含了 .webp 文件，以便处理现有的 WebP 图片。
 - 支持的图片格式： JPG，PNG, JPEG, GIF, BMP, WEBP
 
+## 前提条件
+
+操作系统：支持所有主要的操作系统（Windows、macOS、Linux）。
+
+Python 依赖：
+- 安装 Python 3.x（推荐 3.10 或更高版本）。
+- 安装 Pillow 库（图像处理库）。
+
 ## 使用说明：
 
 首先，确保已安装Pillow库。如果没有，可以使用以下命令安装：
