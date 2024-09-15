@@ -4,14 +4,13 @@ import argparse
 import logging
 import sys
 import time
-from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from functools import reduce, partial
+from functools import reduce
 from itertools import islice
 from pathlib import Path
-from typing import Dict, List, Optional, Callable, Iterator, Union, TypeVar, Generic
+from typing import Dict, List, Optional, Iterator, Union, TypeVar, Generic, Protocol
 
 from PIL import Image
 
@@ -53,12 +52,11 @@ class ConversionStats:
                 f"转换失败: {self.failed}\n"
                 f"总耗时: {duration:.2f} 秒")
 
-class ImageProcessor(ABC):
-    @abstractmethod
+class ImageProcessor(Protocol):
     def process(self, img: Image.Image) -> Image.Image:
-        pass
+        ...
 
-class RGBAToRGBProcessor(ImageProcessor):
+class RGBAToRGBProcessor:
     def process(self, img: Image.Image) -> Image.Image:
         return img.convert('RGB') if img.mode == 'RGBA' else img
 
