@@ -60,8 +60,6 @@ class ConversionStats:
                 f"转换失败: {self.failed}\n"
                 f"总耗时: {duration:.2f} 秒")
 
-ImageProcessor = Callable[[Image.Image], Image.Image]
-
 def rgba_to_rgb(img: Image.Image) -> Image.Image:
     return img.convert('RGB') if img.mode == 'RGBA' else img
 
@@ -80,28 +78,18 @@ class ImageConverter:
         self.recursive = recursive
         self.maintain_structure = maintain_structure
         self.quality = quality
-        self.logger = self._setup_logger()
-        self.stats = ConversionStats()
-        self.processors: List[ImageProcessor] = self._setup_processors()
-
-    def _setup_processors(self) -> List[ImageProcessor]:
-        return [rgba_to_rgb] if self.format in {ImageFormat.JPEG, ImageFormat.JPG, ImageFormat.WEBP} else []
-
-    @staticmethod
-    def _setup_logger() -> logging.Logger:
-        logger = logging.getLogger('ImageConverter')
-        logger.setLevel(logging.INFO)
+        self.logger = logging.getLogger('ImageConverter')
+        self.logger.setLevel(logging.INFO)
         handler = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        return logger
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        self.logger.addHandler(handler)
+        self.stats = ConversionStats()
+        self.process_image = rgba_to_rgb if format in {ImageFormat.JPEG, ImageFormat.JPG, ImageFormat.WEBP} else lambda x: x
 
     def convert_image(self, input_path: Path, output_dir: Path) -> ConversionResult:
         try:
             with Image.open(input_path) as img:
-                for processor in self.processors:
-                    img = processor(img)
+                img = self.process_image(img)
                 output_path = self._get_output_path(input_path, output_dir)
                 save_kwargs = {'quality': self.quality} if self.format in {ImageFormat.JPEG, ImageFormat.JPG, ImageFormat.WEBP} else {}
                 if self.format == ImageFormat.WEBP:
@@ -116,12 +104,6 @@ class ImageConverter:
         full_output_dir = output_dir / relative_path.parent if self.maintain_structure else output_dir
         full_output_dir.mkdir(parents=True, exist_ok=True)
         return full_output_dir / f"{input_path.stem}.{self.format.value}"
-
-    def process_files(self, files: List[Path], output_dir: Path) -> None:
-        with ThreadPoolExecutor(max_workers=multiprocessing.cpu_count() * 2) as executor:
-            futures = [executor.submit(self.convert_image, f, output_dir) for f in files]
-            for future in as_completed(futures):
-                self._handle_result(future.result())
 
     def _handle_result(self, result: ConversionResult) -> None:
         self.stats.update(result)
@@ -140,9 +122,10 @@ class ImageConverter:
         files = list(get_files(input_path, self.recursive, self.IMAGE_EXTENSIONS))
         self.stats.total = len(files)
 
-        chunk_size = max(1000, len(files) // (multiprocessing.cpu_count() * 2))
-        for i in range(0, len(files), chunk_size):
-            self.process_files(files[i:i+chunk_size], output_path)
+        with ThreadPoolExecutor(max_workers=multiprocessing.cpu_count() * 2) as executor:
+            futures = [executor.submit(self.convert_image, f, output_path) for f in files]
+            for future in as_completed(futures):
+                self._handle_result(future.result())
 
         self.logger.info(self.stats.summary())
 
