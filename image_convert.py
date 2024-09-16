@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Iterator, Callable
+from typing import Dict, Optional
 
 import multiprocessing
 from PIL import Image
@@ -27,12 +27,7 @@ class ImageFormat(Enum):
 
     @classmethod
     def from_string(cls, s: str) -> ImageFormat:
-        try:
-            return cls(s.lower())
-        except ValueError:
-            if s.lower() == 'jpg':
-                return cls.JPEG
-            raise ValueError(f"Unsupported format: {s}")
+        return cls.JPEG if s.lower() == 'jpg' else cls(s.lower())
 
 @dataclass(frozen=True)
 class ConversionResult:
@@ -60,16 +55,6 @@ class ConversionStats:
                 f"转换失败: {self.failed}\n"
                 f"总耗时: {duration:.2f} 秒")
 
-def rgba_to_rgb(img: Image.Image) -> Image.Image:
-    return img.convert('RGB') if img.mode == 'RGBA' else img
-
-def get_files(path: Path, recursive: bool, extensions: set[str]) -> Iterator[Path]:
-    if path.is_file():
-        yield path
-    else:
-        glob_pattern = '**/*' if recursive else '*'
-        yield from (f for f in path.glob(glob_pattern) if f.is_file() and f.suffix.lower() in extensions)
-
 class ImageConverter:
     IMAGE_EXTENSIONS = {f'.{fmt.value}' for fmt in ImageFormat}
 
@@ -78,32 +63,34 @@ class ImageConverter:
         self.recursive = recursive
         self.maintain_structure = maintain_structure
         self.quality = quality
-        self.logger = logging.getLogger('ImageConverter')
-        self.logger.setLevel(logging.INFO)
+        self.logger = self._setup_logger()
+        self.stats = ConversionStats()
+        self.save_params = self._get_save_params()
+
+    @staticmethod
+    def _setup_logger() -> logging.Logger:
+        logger = logging.getLogger('ImageConverter')
+        logger.setLevel(logging.INFO)
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        self.logger.addHandler(handler)
-        self.stats = ConversionStats()
-        self.process_image = rgba_to_rgb if format in {ImageFormat.JPEG, ImageFormat.JPG, ImageFormat.WEBP} else lambda x: x
+        logger.addHandler(handler)
+        return logger
 
-    def convert_image(self, input_path: Path, output_dir: Path) -> ConversionResult:
+    def _get_save_params(self) -> Dict[str, int]:
+        params = {'quality': self.quality} if self.format in {ImageFormat.JPEG, ImageFormat.JPG, ImageFormat.WEBP} else {}
+        if self.format == ImageFormat.WEBP:
+            params['method'] = 6
+        return params
+
+    def convert_image(self, input_path: Path, output_path: Path) -> ConversionResult:
         try:
             with Image.open(input_path) as img:
-                img = self.process_image(img)
-                output_path = self._get_output_path(input_path, output_dir)
-                save_kwargs = {'quality': self.quality} if self.format in {ImageFormat.JPEG, ImageFormat.JPG, ImageFormat.WEBP} else {}
-                if self.format == ImageFormat.WEBP:
-                    save_kwargs['method'] = 6
-                img.save(output_path, self.format.value.upper(), **save_kwargs)
+                if img.mode == 'RGBA' and self.format in {ImageFormat.JPEG, ImageFormat.JPG}:
+                    img = img.convert('RGB')
+                img.save(output_path, self.format.value.upper(), **self.save_params)
             return ConversionResult(input_path, output_path, True)
         except Exception as e:
             return ConversionResult(input_path, None, False, str(e))
-
-    def _get_output_path(self, input_path: Path, output_dir: Path) -> Path:
-        relative_path = input_path.relative_to(self.input_dir) if self.maintain_structure else input_path.name
-        full_output_dir = output_dir / relative_path.parent if self.maintain_structure else output_dir
-        full_output_dir.mkdir(parents=True, exist_ok=True)
-        return full_output_dir / f"{input_path.stem}.{self.format.value}"
 
     def _handle_result(self, result: ConversionResult) -> None:
         self.stats.update(result)
@@ -116,18 +103,31 @@ class ImageConverter:
         log_func(message)
 
     def run(self, input_path: Path, output_path: Path) -> None:
-        self.input_dir = input_path if input_path.is_dir() else input_path.parent
+        self.input_path = input_path
         output_path.mkdir(parents=True, exist_ok=True)
-
-        files = list(get_files(input_path, self.recursive, self.IMAGE_EXTENSIONS))
+        files = self._get_files()
         self.stats.total = len(files)
 
-        with ThreadPoolExecutor(max_workers=multiprocessing.cpu_count() * 2) as executor:
-            futures = [executor.submit(self.convert_image, f, output_path) for f in files]
+        with ThreadPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
+            futures = [executor.submit(self.convert_image, f, self._get_output_path(f, output_path)) for f in files]
             for future in as_completed(futures):
                 self._handle_result(future.result())
 
         self.logger.info(self.stats.summary())
+
+    def _get_files(self) -> list[Path]:
+        if self.input_path.is_file():
+            return [self.input_path]
+        pattern = '**/*' if self.recursive else '*'
+        return [f for f in self.input_path.glob(pattern) if f.is_file() and f.suffix.lower() in self.IMAGE_EXTENSIONS]
+
+    def _get_output_path(self, input_path: Path, base_output_path: Path) -> Path:
+        if not self.maintain_structure:
+            return base_output_path / f"{input_path.stem}.{self.format.value}"
+        relative_path = input_path.relative_to(self.input_path)
+        output_dir = base_output_path / relative_path.parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir / f"{input_path.stem}.{self.format.value}"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="批量图片格式转换工具 (支持多种图片格式和递归处理)")
