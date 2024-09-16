@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Iterator, Protocol, Callable
+from typing import Dict, List, Optional, Iterator, Callable
 
 import multiprocessing
 from PIL import Image
@@ -60,44 +60,17 @@ class ConversionStats:
                 f"转换失败: {self.failed}\n"
                 f"总耗时: {duration:.2f} 秒")
 
-class ImageProcessor(Protocol):
-    def process(self, img: Image.Image) -> Image.Image:
-        ...
+ImageProcessor = Callable[[Image.Image], Image.Image]
 
-class RGBAToRGBProcessor:
-    def process(self, img: Image.Image) -> Image.Image:
-        return img.convert('RGB') if img.mode == 'RGBA' else img
+def rgba_to_rgb(img: Image.Image) -> Image.Image:
+    return img.convert('RGB') if img.mode == 'RGBA' else img
 
-class ImageSaver:
-    def __init__(self, format: ImageFormat, quality: int):
-        self.format = format
-        self.save_kwargs: Dict[str, int] = {}
-        if format in {ImageFormat.JPEG, ImageFormat.JPG, ImageFormat.WEBP}:
-            self.save_kwargs['quality'] = quality
-        if format == ImageFormat.WEBP:
-            self.save_kwargs['method'] = 6
-
-    def save(self, img: Image.Image, output_path: Path) -> None:
-        save_format = 'JPEG' if self.format in (ImageFormat.JPEG, ImageFormat.JPG) else self.format.value.upper()
-        img.save(output_path, save_format, **self.save_kwargs)
-
-class FileHandler(Protocol):
-    def get_files(self, path: Path) -> Iterator[Path]:
-        ...
-
-class RecursiveFileHandler:
-    def __init__(self, extensions: set[str]):
-        self.extensions = extensions
-
-    def get_files(self, path: Path) -> Iterator[Path]:
-        return (f for f in path.rglob('*') if f.is_file() and f.suffix.lower() in self.extensions)
-
-class NonRecursiveFileHandler:
-    def __init__(self, extensions: set[str]):
-        self.extensions = extensions
-
-    def get_files(self, path: Path) -> Iterator[Path]:
-        return (f for f in path.iterdir() if f.is_file() and f.suffix.lower() in self.extensions)
+def get_files(path: Path, recursive: bool, extensions: set[str]) -> Iterator[Path]:
+    if path.is_file():
+        yield path
+    else:
+        glob_pattern = '**/*' if recursive else '*'
+        yield from (f for f in path.glob(glob_pattern) if f.is_file() and f.suffix.lower() in extensions)
 
 class ImageConverter:
     IMAGE_EXTENSIONS = {f'.{fmt.value}' for fmt in ImageFormat}
@@ -106,18 +79,13 @@ class ImageConverter:
         self.format = format
         self.recursive = recursive
         self.maintain_structure = maintain_structure
+        self.quality = quality
         self.logger = self._setup_logger()
         self.stats = ConversionStats()
         self.processors: List[ImageProcessor] = self._setup_processors()
-        self.saver = ImageSaver(format, quality)
-        self.file_handler: FileHandler = (RecursiveFileHandler(self.IMAGE_EXTENSIONS) if recursive
-                                          else NonRecursiveFileHandler(self.IMAGE_EXTENSIONS))
 
     def _setup_processors(self) -> List[ImageProcessor]:
-        processors = []
-        if self.format in {ImageFormat.JPEG, ImageFormat.JPG, ImageFormat.WEBP}:
-            processors.append(RGBAToRGBProcessor())
-        return processors
+        return [rgba_to_rgb] if self.format in {ImageFormat.JPEG, ImageFormat.JPG, ImageFormat.WEBP} else []
 
     @staticmethod
     def _setup_logger() -> logging.Logger:
@@ -133,9 +101,12 @@ class ImageConverter:
         try:
             with Image.open(input_path) as img:
                 for processor in self.processors:
-                    img = processor.process(img)
+                    img = processor(img)
                 output_path = self._get_output_path(input_path, output_dir)
-                self.saver.save(img, output_path)
+                save_kwargs = {'quality': self.quality} if self.format in {ImageFormat.JPEG, ImageFormat.JPG, ImageFormat.WEBP} else {}
+                if self.format == ImageFormat.WEBP:
+                    save_kwargs['method'] = 6
+                img.save(output_path, self.format.value.upper(), **save_kwargs)
             return ConversionResult(input_path, output_path, True)
         except Exception as e:
             return ConversionResult(input_path, None, False, str(e))
@@ -166,7 +137,7 @@ class ImageConverter:
         self.input_dir = input_path if input_path.is_dir() else input_path.parent
         output_path.mkdir(parents=True, exist_ok=True)
 
-        files = [input_path] if input_path.is_file() else list(self.file_handler.get_files(input_path))
+        files = list(get_files(input_path, self.recursive, self.IMAGE_EXTENSIONS))
         self.stats.total = len(files)
 
         chunk_size = max(1000, len(files) // (multiprocessing.cpu_count() * 2))
